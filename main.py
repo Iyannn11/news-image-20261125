@@ -6,11 +6,8 @@ repository as entry.png, next to this file. All this program does is
 copy that finished image into the directory the grader reads from.
 
 Deliberately standard library only. The grader runs Python 3.13 in a
-sandbox without Pillow, so nothing here imports PIL or touches system
-fonts — a plain file copy cannot fail on a missing third-party
-package. The repository is mounted read-only while grading, so this
-program never writes beside itself; it only writes to the output
-directory named by MAKEFUN_OUTPUT_DIR (falling back to /output).
+sandbox without Pillow, so nothing here imports PIL or any third-party
+module.
 """
 
 import os
@@ -18,23 +15,32 @@ import shutil
 import sys
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent
-DEST_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def main() -> int:
-    source = BASE / "entry.png"
-    target = DEST_DIR / "entry.png"
-    if not source.is_file():
-        print(f"entry image missing: {source}", file=sys.stderr)
+def main():
+    bot_dir = Path(os.environ.get("MAKEFUN_BOT_DIR", Path(__file__).resolve().parent))
+    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", Path("/output")))
+    src = bot_dir / "entry.png"
+    if not src.is_file():
+        print(f"entry.png not found in {bot_dir}", file=sys.stderr)
         return 1
-    DEST_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
-    data = target.read_bytes()
-    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) != source.stat().st_size:
-        print("copied image failed PNG validation", file=sys.stderr)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / "entry.png"
+    shutil.copyfile(src, dst)
+    data = dst.read_bytes()
+    if not data.startswith(PNG_MAGIC):
+        print("copied file is not a PNG", file=sys.stderr)
         return 1
-    print(f"copied {source} -> {target} ({target.stat().st_size} bytes)")
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    if (width, height) != (1024, 1024):
+        print(f"copied PNG is {width}x{height}, expected 1024x1024", file=sys.stderr)
+        return 1
+    if len(data) > 1024 * 1024:
+        print("copied PNG exceeds 1 MiB", file=sys.stderr)
+        return 1
+    print(f"copied entry.png ({len(data)} bytes, {width}x{height}) to {dst}")
     return 0
 
 
